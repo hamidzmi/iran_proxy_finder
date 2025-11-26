@@ -1,8 +1,0 @@
-[
-  {
-    "proxy": "62.60.246.164:9080",
-    "latency": 2.621,
-    "scheme": "http",
-    "target": "https://api.ipify.org?format=json"
-  }
-]
