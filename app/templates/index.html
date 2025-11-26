@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Iran Proxy Finder</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" />
+    <link
+      rel="icon"
+      type="image/png"
+      href="/assets/img/iran-proxy-finder-256.png"
+      sizes="256x256"
+    />
+    <style>
+      :root {
+        --primary: #0ea5e9;
+        --danger: #ef4444;
+        --ok: #16a34a;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        margin: 2rem auto;
+        max-width: 900px;
+        background: #f7f7f7;
+        color: #1f2937;
+        padding-bottom: 72px;
+      }
+      h1 {
+        color: #0f172a;
+      }
+      .btn {
+        padding: 0.7rem 1.4rem;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 1rem;
+      }
+      .btn-primary {
+        background: var(--primary);
+        color: white;
+      }
+      .btn-danger {
+        background: var(--danger);
+        color: white;
+      }
+      .btn:disabled {
+        background: #94a3b8;
+        cursor: not-allowed;
+      }
+      .card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+      }
+      pre {
+        background: #0b172a;
+        color: #e2e8f0;
+        padding: 1rem;
+        border-radius: 8px;
+        max-height: 450px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+      .pill {
+        display: inline-block;
+        padding: 0.3rem 0.8rem;
+        border-radius: 999px;
+      }
+      .pill.running {
+        background: #d1fae5;
+        color: #047857;
+      }
+      .pill.idle {
+        background: #f3f4f6;
+        color: #1f2937;
+      }
+      .pill.stopping {
+        background: #fde68a;
+        color: #92400e;
+      }
+      .summary {
+        margin-top: 1rem;
+        color: #334155;
+      }
+      .controls {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .select {
+        appearance: none;
+        padding: 0.5rem 2rem 0.5rem 0.75rem;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #ffffff
+          url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path fill="%236b7280" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>')
+          no-repeat right 0.6rem center;
+        background-size: 1rem;
+        color: #111827;
+      }
+      .select:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.35);
+        border-color: var(--primary);
+      }
+      .footer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #ffffff;
+        border-top: 1px solid #e5e7eb;
+        padding: 0.75rem;
+        text-align: center;
+        color: #475569;
+      }
+      .footer a {
+        color: var(--primary);
+        text-decoration: none;
+      }
+      .footer a:hover {
+        text-decoration: underline;
+      }
+      .spinner {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid #ffffff;
+        border-right-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        margin-left: 8px;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>
+      <img
+        src="/assets/img/iran-proxy-finder-256.png"
+        alt=""
+        style="
+          width: 44px;
+          height: 44px;
+          vertical-align: middle;
+          margin-right: 0.5rem;
+        "
+      />Iran Proxy Finder
+    </h1>
+    <div class="card">
+      <p>
+        Start a new scan to fetch, test, and save working Iranian proxies. Logs
+        will appear below in real time.
+      </p>
+      <div class="controls">
+        <button id="start-btn" class="btn btn-primary">Start Scan</button>
+        <button id="stop-btn" class="btn btn-danger" disabled>Stop</button>
+        <span id="status-pill" class="pill idle">Idle</span>
+        <label for="target-select">Target:</label>
+        <select id="target-select" class="select">
+          <option value="all" selected>All Static Targets</option>
+          <option value="https://api.ipify.org?format=json">
+            https://api.ipify.org?format=json
+          </option>
+          <option value="https://httpbin.org/get">
+            https://httpbin.org/get
+          </option>
+          <option value="https://icanhazip.com">https://icanhazip.com</option>
+        </select>
+      </div>
+      <div class="summary" id="summary">Waiting to start...</div>
+    </div>
+    <div class="card" style="margin-top: 1rem">
+      <h3>Found Proxies</h3>
+      <div id="found"></div>
+    </div>
+    <div class="card" style="margin-top: 1rem">
+      <h3>Logs</h3>
+      <pre id="logs"></pre>
+    </div>
+    <div class="footer">
+      Have ideas or want to contribute? Visit the public repository:
+      <a
+        href="https://github.com/hajiparvaneh/iran_proxy_finder"
+        target="_blank"
+        rel="noopener"
+        >github.com/hajiparvaneh/iran_proxy_finder</a
+      >
+    </div>
+    <script>
+      const startButton = document.getElementById("start-btn");
+      const stopButton = document.getElementById("stop-btn");
+      const logsPre = document.getElementById("logs");
+      const statusPill = document.getElementById("status-pill");
+      const summary = document.getElementById("summary");
+      const targetSelect = document.getElementById("target-select");
+      const STATIC_TARGETS = [
+        "https://api.ipify.org?format=json",
+        "https://httpbin.org/get",
+        "https://icanhazip.com",
+      ];
+
+      function esc(s) {
+        return s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      async function fetchLogs() {
+        const res = await fetch("/logs");
+        const data = await res.json();
+        const html = data.logs
+          .map((l) =>
+            l.startsWith("[OK]")
+              ? '<span style="color:#16a34a">' + esc(l) + "</span>"
+              : esc(l)
+          )
+          .join("<br>");
+        logsPre.innerHTML = html;
+        const oks = data.logs.filter((l) => l.startsWith("[OK]"));
+        document.getElementById("found").innerHTML = oks
+          .map((l) => '<div style="color:#16a34a">' + esc(l) + "</div>")
+          .join("");
+      }
+
+      async function refreshStatus() {
+        const res = await fetch("/status");
+        const data = await res.json();
+        if (data.running) {
+          if (data.stopping) {
+            statusPill.textContent = "Stopping";
+            statusPill.className = "pill stopping";
+            startButton.disabled = true;
+            stopButton.disabled = true;
+            summary.textContent = "Stopping...";
+          } else {
+            statusPill.textContent = "Running";
+            statusPill.className = "pill running";
+            startButton.disabled = true;
+            stopButton.disabled = false;
+            summary.textContent = "Scanning proxies...";
+          }
+        } else {
+          statusPill.textContent = "Idle";
+          statusPill.className = "pill idle";
+          startButton.disabled = false;
+          stopButton.disabled = true;
+          summary.textContent = data.last_finished
+            ? `Last run finished at ${new Date(
+                data.last_finished * 1000
+              ).toLocaleString()}`
+            : "Waiting to start...";
+        }
+      }
+
+      async function startScan() {
+        startButton.disabled = true;
+        try {
+          const sel = targetSelect.value;
+          const payload =
+            sel === "all" ? { targets: STATIC_TARGETS } : { targets: [sel] };
+          const res = await fetch("/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const msg = await res.text();
+            alert(msg || "Unable to start scan");
+          }
+        } catch (error) {
+          console.error("Failed to start scan:", error);
+          alert("Failed to start scan. See console for details.");
+        }
+        await refreshStatus();
+      }
+      startButton.onclick = startScan;
+
+      async function stopScan() {
+        stopButton.disabled = true;
+        stopButton.innerHTML = 'Stopping... <span class="spinner"></span>';
+        statusPill.textContent = "Stopping";
+        statusPill.className = "pill stopping";
+        summary.textContent = "Stopping...";
+        try {
+          const res = await fetch("/stop", { method: "POST" });
+          if (!res.ok) {
+            const msg = await res.text();
+            alert(msg || "Unable to stop scan");
+          }
+        } catch (error) {
+          console.error("Failed to stop scan:", error);
+          alert("Failed to stop scan. See console for details.");
+        }
+        await refreshStatus();
+        stopButton.innerHTML = "Stop";
+      }
+      stopButton.onclick = stopScan;
+
+      async function refreshResults() {
+        await fetchLogs();
+        await refreshStatus();
+      }
+      refreshResults();
+      setInterval(refreshResults, 2500);
+    </script>
+  </body>
+</html>

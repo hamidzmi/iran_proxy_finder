@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Callable, List
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from scraper import get_proxies
 from tester import test_proxy
@@ -24,6 +24,7 @@ def resolve_output_path() -> Path:
 
 
 OUTPUT_FILE = resolve_output_path()
+ASSET_IMG_DIR = Path(__file__).parent / "assets" / "img"
 
 LogHandler = Callable[[str], None]
 
@@ -54,6 +55,8 @@ class ProxyRunner:
         self._running = False
         self._last_started: float | None = None
         self._last_finished: float | None = None
+        self._stop_event: threading.Event | None = None
+        self._stopping: bool = False
 
     def start(self) -> bool:
         with self._lock:
@@ -61,22 +64,34 @@ class ProxyRunner:
                 return False
             self._running = True
             self._last_started = time.time()
+            self._stop_event = threading.Event()
+            self._stopping = False
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
             return True
 
     def _run(self) -> None:
         try:
-            run_workflow(self._log_handler)
+            run_workflow(self._log_handler, self._stop_event)
         finally:
             with self._lock:
                 self._running = False
                 self._last_finished = time.time()
+                self._stop_event = None
+                self._stopping = False
 
     @property
     def is_running(self) -> bool:
         with self._lock:
             return self._running
+
+    def stop(self) -> bool:
+        with self._lock:
+            if not self._running or self._stop_event is None:
+                return False
+            self._stop_event.set()
+            self._stopping = True
+            return True
 
     def status(self) -> dict:
         with self._lock:
@@ -84,6 +99,7 @@ class ProxyRunner:
                 "running": self._running,
                 "last_started": self._last_started,
                 "last_finished": self._last_finished,
+                "stopping": self._stopping,
             }
 
 
@@ -97,7 +113,9 @@ def persist_results(working: List[dict]) -> None:
         print(json.dumps(working, indent=2))
 
 
-def run_workflow(log: LogHandler) -> List[dict]:
+def run_workflow(
+    log: LogHandler, stop_event: threading.Event | None = None
+) -> List[dict]:
     log("Scraping proxies...")
     proxies = get_proxies()
     log(f"Total proxies found: {len(proxies)}")
@@ -141,23 +159,29 @@ def run_workflow(log: LogHandler) -> List[dict]:
         log(f"Testing target: {target}")
         tested = 0
         for proxy in proxies:
+            if stop_event is not None and stop_event.is_set():
+                break
             if per_target_limit is not None and tested >= per_target_limit:
                 break
             is_working, latency, scheme = test_proxy(proxy, target_url=target)
             tested += 1
             if is_working and latency is not None:
-                working.append({
-                    "proxy": proxy,
-                    "latency": round(latency, 3),
-                    "scheme": scheme,
-                    "target": target,
-                })
+                working.append(
+                    {
+                        "proxy": proxy,
+                        "latency": round(latency, 3),
+                        "scheme": scheme,
+                        "target": target,
+                    }
+                )
                 log(f"[OK] {proxy} via {scheme} - {latency:.3f}s")
             else:
                 log(f"[FAIL] {proxy}")
 
     persist_results(working)
 
+    if stop_event is not None and stop_event.is_set():
+        log("Stopped")
     log("Summary:")
     log(f"Working proxies: {len(working)}")
     log(f"Results saved to {OUTPUT_FILE}")
@@ -180,125 +204,19 @@ def create_app(autostart: bool = True) -> Flask:
 
     @app.route("/")
     def index() -> str:
-        return render_template_string(
-            """
-            <!doctype html>
-            <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <title>Iran Proxy Finder</title>
-              <style>
-                body { font-family: Arial, sans-serif; margin: 2rem auto; max-width: 900px; background: #f7f7f7; color: #1f2937; }
-                h1 { color: #0f172a; }
-                button { padding: 0.7rem 1.4rem; background: #0ea5e9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
-                button:disabled { background: #94a3b8; cursor: not-allowed; }
-                .card { background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); }
-                pre { background: #0b172a; color: #e2e8f0; padding: 1rem; border-radius: 8px; max-height: 450px; overflow-y: auto; white-space: pre-wrap; }
-                .status { margin-left: 1rem; font-weight: bold; }
-                .pill { display: inline-block; padding: 0.3rem 0.8rem; border-radius: 999px; }
-                .pill.running { background: #d1fae5; color: #047857; }
-                .pill.idle { background: #f3f4f6; color: #1f2937; }
-                .summary { margin-top: 1rem; color: #334155; }
-              </style>
-            </head>
-            <body>
-              <h1>Iran Proxy Finder</h1>
-              <div class="card">
-                <p>Start a new scan to fetch, test, and save working Iranian proxies. Logs will appear below in real time.</p>
-                <div>
-                  <button id="start-btn">Start Scan</button>
-                  <span id="status-pill" class="pill idle">Idle</span>
-                </div>
-                <div style="margin-top: 0.75rem;">
-                  <label for="target-select">Target:</label>
-                  <select id="target-select">
-                    <option value="all" selected>All Static Targets</option>
-                    <option value="https://api.ipify.org?format=json">https://api.ipify.org?format=json</option>
-                    <option value="https://httpbin.org/get">https://httpbin.org/get</option>
-                    <option value="https://icanhazip.com">https://icanhazip.com</option>
-                  </select>
-                </div>
-                <div class="summary" id="summary">Waiting to start...</div>
-              </div>
-              <div class="card" style="margin-top: 1rem;">
-                <h3>Logs</h3>
-                <pre id="logs"></pre>
-              </div>
-              <script>
-                const startButton = document.getElementById('start-btn');
-                const logsPre = document.getElementById('logs');
-                const statusPill = document.getElementById('status-pill');
-                const summary = document.getElementById('summary');
-                const targetSelect = document.getElementById('target-select');
-                const STATIC_TARGETS = [
-                  'https://api.ipify.org?format=json',
-                  'https://httpbin.org/get',
-                  'https://icanhazip.com'
-                ];
+        return render_template("index.html")
 
-                function esc(s) {
-                  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                }
-
-                async function fetchLogs() {
-                  const res = await fetch('/logs');
-                  const data = await res.json();
-                  const html = data.logs.map(l => {
-                    if (l.startsWith('[OK]')) return '<span style="color:#16a34a">' + esc(l) + '</span>';
-                    return esc(l);
-                  }).join('<br>');
-                  logsPre.innerHTML = html;
-                }
-
-                async function refreshStatus() {
-                  const res = await fetch('/status');
-                  const data = await res.json();
-                  if (data.running) {
-                    statusPill.textContent = 'Running';
-                    statusPill.className = 'pill running';
-                    startButton.disabled = true;
-                    summary.textContent = 'Scanning proxies...';
-                  } else {
-                    statusPill.textContent = 'Idle';
-                    statusPill.className = 'pill idle';
-                    startButton.disabled = false;
-                    summary.textContent = data.last_finished ?
-                      `Last run finished at ${new Date(data.last_finished * 1000).toLocaleString()}` :
-                      'Waiting to start...';
-                  }
-                }
-
-                async function startScan() {
-                  startButton.disabled = true;
-                  try {
-                    const sel = targetSelect.value;
-                    const payload = sel === 'all' ? { targets: STATIC_TARGETS } : { targets: [sel] };
-                    const res = await fetch('/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                    if (!res.ok) {
-                      const msg = await res.text();
-                      alert(msg || 'Unable to start scan');
-                    }
-                  } catch (error) {
-                      console.error('Failed to start scan:', error);
-                      alert('Failed to start scan. See console for details.');
-                  }
-                  await refreshStatus();
-                }
-                startButton.onclick = startScan;
-
-                async function refreshResults() {
-                  await fetchLogs();
-                  await refreshStatus();
-                }
-
-                refreshResults();
-                setInterval(refreshResults, 2500);
-              </script>
-            </body>
-            </html>
-            """,
+    @app.route("/favicon.ico")
+    def favicon():
+        return send_from_directory(
+            str(ASSET_IMG_DIR),
+            "iran-proxy-finder.ico",
+            mimetype="image/x-icon",
         )
+
+    @app.route("/assets/img/<path:filename>")
+    def serve_img(filename: str):
+        return send_from_directory(str(ASSET_IMG_DIR), filename)
 
     @app.route("/start", methods=["POST"])
     def start_scan():
@@ -312,6 +230,13 @@ def create_app(autostart: bool = True) -> Flask:
         if not started:
             return "Scan already running", 409
         return "Started", 202
+
+    @app.route("/stop", methods=["POST"])
+    def stop_scan():
+        stopped = runner.stop()
+        if not stopped:
+            return "No scan running", 409
+        return "Stopping", 202
 
     @app.route("/logs")
     def logs():  # type: ignore[override]
