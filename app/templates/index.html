@@ -271,17 +271,28 @@
               esc(proxy) +
               "</div>" +
               '<div class="proxy-actions">' +
-              '<button class="btn btn-sm btn-ghost" onclick="copyText(\'' +
+              '<button class="btn btn-sm btn-ghost copy-ip" data-ip="' +
               esc(ip) +
-              "')\">Copy IP</button>" +
-              '<button class="btn btn-sm btn-ghost" onclick="copyText(\'' +
+              '">Copy IP</button>' +
+              '<button class="btn btn-sm btn-ghost copy-port" data-port="' +
               esc(port) +
-              "')\">Copy Port</button>" +
+              '">Copy Port</button>' +
               "</div>" +
               "</div>"
           );
         }
-        document.getElementById("found").innerHTML = items.join("");
+        const foundEl = document.getElementById("found");
+        foundEl.innerHTML = items.join("");
+        foundEl.querySelectorAll(".copy-ip").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            await copyTextBtn(btn, btn.getAttribute("data-ip"));
+          });
+        });
+        foundEl.querySelectorAll(".copy-port").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            await copyTextBtn(btn, btn.getAttribute("data-port"));
+          });
+        });
       }
 
       async function refreshStatus() {
@@ -371,6 +382,20 @@
           } catch (_) {}
           document.body.removeChild(ta);
         }
+      }
+
+      async function copyTextBtn(btn, text) {
+        await copyText(text);
+        const oldClass = btn.className;
+        const originalLabel = btn.textContent;
+        btn.textContent = "Copied";
+        btn.className = "btn btn-sm btn-primary";
+        btn.disabled = true;
+        setTimeout(() => {
+          btn.textContent = originalLabel;
+          btn.className = oldClass;
+          btn.disabled = false;
+        }, 1400);
       }
 
       async function refreshResults() {
