@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Callable, List
 
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 
 from scraper import get_proxies
 from tester import test_proxy
@@ -102,14 +102,59 @@ def run_workflow(log: LogHandler) -> List[dict]:
     proxies = get_proxies()
     log(f"Total proxies found: {len(proxies)}")
 
-    working: List[dict[str, float]] = []
-    for proxy in proxies:
-        is_working, latency = test_proxy(proxy)
-        if is_working and latency is not None:
-            working.append({"proxy": proxy, "latency": round(latency, 3)})
-            log(f"[OK] {proxy} - {latency:.3f}s")
+    max_env = os.environ.get("MAX_PROXIES")
+    if max_env:
+        try:
+            limit = int(max_env)
+            if limit > 0:
+                proxies = proxies[:limit]
+                log(f"Testing first {len(proxies)} proxies due to MAX_PROXIES")
+        except ValueError:
+            pass
+
+    targets_env = os.environ.get("TARGET_URLS")
+    if targets_env:
+        targets = [t.strip() for t in targets_env.split(",") if t.strip()]
+    else:
+        single = os.environ.get("TARGET_URL")
+        if single:
+            targets = [single]
         else:
-            log(f"[FAIL] {proxy}")
+            targets = [
+                "https://api.ipify.org?format=json",
+                "https://httpbin.org/get",
+                "https://icanhazip.com",
+            ]
+
+    per_target_limit_env = os.environ.get("MAX_PER_TARGET")
+    per_target_limit: int | None = None
+    if per_target_limit_env:
+        try:
+            val = int(per_target_limit_env)
+            if val > 0:
+                per_target_limit = val
+        except ValueError:
+            pass
+
+    working: List[dict] = []
+    for target in targets:
+        log(f"Testing target: {target}")
+        tested = 0
+        for proxy in proxies:
+            if per_target_limit is not None and tested >= per_target_limit:
+                break
+            is_working, latency, scheme = test_proxy(proxy, target_url=target)
+            tested += 1
+            if is_working and latency is not None:
+                working.append({
+                    "proxy": proxy,
+                    "latency": round(latency, 3),
+                    "scheme": scheme,
+                    "target": target,
+                })
+                log(f"[OK] {proxy} via {scheme} - {latency:.3f}s")
+            else:
+                log(f"[FAIL] {proxy}")
 
     persist_results(working)
 
@@ -165,6 +210,15 @@ def create_app(autostart: bool = True) -> Flask:
                   <button id="start-btn">Start Scan</button>
                   <span id="status-pill" class="pill idle">Idle</span>
                 </div>
+                <div style="margin-top: 0.75rem;">
+                  <label for="target-select">Target:</label>
+                  <select id="target-select">
+                    <option value="all" selected>All Static Targets</option>
+                    <option value="https://api.ipify.org?format=json">https://api.ipify.org?format=json</option>
+                    <option value="https://httpbin.org/get">https://httpbin.org/get</option>
+                    <option value="https://icanhazip.com">https://icanhazip.com</option>
+                  </select>
+                </div>
                 <div class="summary" id="summary">Waiting to start...</div>
               </div>
               <div class="card" style="margin-top: 1rem;">
@@ -176,11 +230,25 @@ def create_app(autostart: bool = True) -> Flask:
                 const logsPre = document.getElementById('logs');
                 const statusPill = document.getElementById('status-pill');
                 const summary = document.getElementById('summary');
+                const targetSelect = document.getElementById('target-select');
+                const STATIC_TARGETS = [
+                  'https://api.ipify.org?format=json',
+                  'https://httpbin.org/get',
+                  'https://icanhazip.com'
+                ];
+
+                function esc(s) {
+                  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                }
 
                 async function fetchLogs() {
                   const res = await fetch('/logs');
                   const data = await res.json();
-                  logsPre.textContent = data.logs.join('\\n');
+                  const html = data.logs.map(l => {
+                    if (l.startsWith('[OK]')) return '<span style="color:#16a34a">' + esc(l) + '</span>';
+                    return esc(l);
+                  }).join('<br>');
+                  logsPre.innerHTML = html;
                 }
 
                 async function refreshStatus() {
@@ -204,7 +272,9 @@ def create_app(autostart: bool = True) -> Flask:
                 async function startScan() {
                   startButton.disabled = true;
                   try {
-                    const res = await fetch('/start', { method: 'POST' });
+                    const sel = targetSelect.value;
+                    const payload = sel === 'all' ? { targets: STATIC_TARGETS } : { targets: [sel] };
+                    const res = await fetch('/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     if (!res.ok) {
                       const msg = await res.text();
                       alert(msg || 'Unable to start scan');
@@ -232,6 +302,12 @@ def create_app(autostart: bool = True) -> Flask:
 
     @app.route("/start", methods=["POST"])
     def start_scan():
+        data = request.get_json(silent=True) or {}
+        targets = data.get("targets")
+        if isinstance(targets, list) and targets:
+            os.environ["TARGET_URLS"] = ",".join(str(t) for t in targets)
+        else:
+            os.environ.pop("TARGET_URLS", None)
         started = runner.start()
         if not started:
             return "Scan already running", 409
