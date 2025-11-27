@@ -12,13 +12,19 @@ Find which public Iranian proxies work for your connection right now. Run locall
    git clone https://github.com/hajiparvaneh/iran_proxy_finder.git
    cd iran_proxy_finder
    ```
-2. Build and run (default web UI port is `5000`). If that port is busy, set `HOST_PORT` to any free port (for example `5001`):
+2. (Optional) Copy `.env.example` to `.env` and adjust values:
+   ```bash
+   cp .env.example .env
+   # edit .env and set numbers like MAX_PROXIES, MAX_PER_TARGET
+   ```
+   If you skip this, default values are used automatically.
+3. Build and run (default web UI port is `5000`). If that port is busy, set `HOST_PORT` to any free port (for example `5001`):
    ```bash
    docker compose up --build
    # or
    HOST_PORT=5001 docker compose up --build
    ```
-3. Open the web dashboard at `http://localhost:5000` (or your `HOST_PORT`).
+4. Open the web dashboard at `http://localhost:5000` (or your `HOST_PORT`).
    - Click **Start Scan** to fetch and validate proxies.
    - Watch progress in the live log panel.
    - Results are saved to `app/working_proxies.json` by default (see `OUTPUT_FILE`).

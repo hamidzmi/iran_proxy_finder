@@ -8,7 +8,13 @@ services:
     volumes:
       - ./app:/app
     environment:
-      - file=.env 
+      - TARGET_URLS=${TARGET_URLS:-}
+      - TARGET_URL=${TARGET_URL:-}
+      - MAX_PROXIES=${MAX_PROXIES:-}
+      - MAX_PER_TARGET=${MAX_PER_TARGET:-}
+      - VERIFY_IR=${VERIFY_IR:-0}
+      - OUTPUT_FILE=${OUTPUT_FILE:-}
+      - AUTOSTART=${AUTOSTART:-0}
     working_dir: /app
     command: ["python", "run.py"]
     ports:
