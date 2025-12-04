@@ -188,7 +188,11 @@ def run_workflow(
             for future in as_completed(futures):
                 if stop_event is not None and stop_event.is_set():
                     break
-                proxy, is_working, latency, scheme = future.result()
+                try:
+                    proxy, is_working, latency, scheme = future.result()
+                except Exception as e:
+                    log(f"[ERROR] Unexpected error testing proxy: {e}")
+                    continue
                 if is_working and latency is not None:
                     working.append(
                         {
